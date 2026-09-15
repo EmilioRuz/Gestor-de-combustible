@@ -8,8 +8,10 @@ from gestor import GestorDatos
 from repositorio import (
     obtener_vehiculos,
     insertar_vehiculo,
+    actualizar_vehiculo,
     eliminar_vehiculo as eliminar_vehiculo_bd
 )
+
 
 
 class App:
@@ -31,7 +33,7 @@ class App:
                 ) = registro
 
                 vehiculo = Vehiculo(
-                    id=None,
+                    id=id_vehiculo,
                     nombre=nombre,
                     placa=placa,
                     marca=marca,
@@ -59,6 +61,7 @@ class App:
         self.gestor = GestorDatos()
         self.campos = {}
         self.editando = None
+        self.editando_vehiculo = None
 
         self.crear_interfaz()
         self.cargar_vehiculos()
@@ -194,6 +197,7 @@ class App:
             tab,
             text="Registrar vehículo"
         )
+
         formulario.pack(
             fill="x",
             padx=10,
@@ -218,11 +222,13 @@ class App:
                 i % 2
             )
 
-        ttk.Button(
+        self.boton_vehiculo = ttk.Button(
             formulario,
             text="Registrar vehículo",
             command=self.registrar_vehiculo
-        ).grid(
+        )
+
+        self.boton_vehiculo.grid(
             row=3,
             column=3,
             padx=8,
@@ -241,11 +247,29 @@ class App:
             )
         )
 
+        # Botones de acciones
+        botones = ttk.Frame(tab)
+        botones.pack(pady=8)
+
         ttk.Button(
-            tab,
+            botones,
+            text="Editar vehículo",
+            command=self.editar_vehiculo
+        ).grid(
+            row=0,
+            column=0,
+            padx=5
+        )
+
+        ttk.Button(
+            botones,
             text="Eliminar vehículo",
             command=self.eliminar_vehiculo
-        ).pack(pady=8)
+        ).grid(
+            row=0,
+            column=1,
+            padx=5
+        )
 
     def registrar_vehiculo(self):
         try:
@@ -272,58 +296,121 @@ class App:
                     "Ingrese la placa del vehículo."
                 )
 
-            if rendimiento <= 0 or precio <= 0:
+            if rendimiento <= 0:
                 raise ValueError(
-                    "El rendimiento y el precio "
-                    "deben ser mayores que cero."
+                    "El rendimiento debe ser mayor que cero."
                 )
 
-            # Guardar primero en SQL Server
-            id_vehiculo = insertar_vehiculo(
-                nombre,
-                placa,
-                marca,
-                modelo,
-                rendimiento,
-                precio
-            )
+            if precio <= 0:
+                raise ValueError(
+                    "El precio debe ser mayor que cero."
+                )
 
-            # Crear el objeto con el ID generado
-            vehiculo = Vehiculo(
-                id=id_vehiculo,
-                nombre=nombre,
-                placa=placa,
-                marca=marca,
-                modelo=modelo,
-                rendimiento=rendimiento,
-                precio=precio
-            )
+            # ==================================
+            # EDITAR
+            # ==================================
 
-            # Agregarlo a la aplicación
-            self.gestor.agregar_vehiculo(vehiculo)
+            if self.editando_vehiculo is not None:
+
+                print(
+                    "EJECUTANDO UPDATE. ID:",
+                    self.editando_vehiculo
+                )
+
+                actualizar_vehiculo(
+                    self.editando_vehiculo,
+                    nombre,
+                    placa,
+                    marca,
+                    modelo,
+                    rendimiento,
+                    precio
+                )
+
+                # Actualizamos el objeto en memoria
+                for vehiculo in self.gestor.vehiculos:
+
+                    if vehiculo.id == self.editando_vehiculo:
+                        vehiculo.nombre = nombre
+                        vehiculo.placa = placa
+                        vehiculo.marca = marca
+                        vehiculo.modelo = modelo
+                        vehiculo.rendimiento = rendimiento
+                        vehiculo.precio = precio
+
+                        break
+
+                mensaje = "Vehículo actualizado correctamente."
+
+            # ==================================
+            # NUEVO
+            # ==================================
+
+            else:
+
+                print("EJECUTANDO INSERT")
+
+                id_vehiculo = insertar_vehiculo(
+                    nombre,
+                    placa,
+                    marca,
+                    modelo,
+                    rendimiento,
+                    precio
+                )
+
+                vehiculo = Vehiculo(
+                    id=id_vehiculo,
+                    nombre=nombre,
+                    placa=placa,
+                    marca=marca,
+                    modelo=modelo,
+                    rendimiento=rendimiento,
+                    precio=precio
+                )
+
+                self.gestor.agregar_vehiculo(
+                    vehiculo
+                )
+
+                mensaje = "Vehículo registrado correctamente."
 
         except ValueError as error:
+
             messagebox.showerror(
                 "Error",
                 str(error)
             )
+
             return
 
         except Exception as error:
+
             messagebox.showerror(
                 "Error de base de datos",
                 f"No se pudo guardar el vehículo.\n\n{error}"
             )
+
             return
+
+        # ==================================
+        # SALIR DEL MODO EDICIÓN
+        # ==================================
+
+        self.editando_vehiculo = None
+
+        self.boton_vehiculo.config(
+            text="Registrar vehículo"
+        )
 
         self.actualizar_vehiculos()
         self.actualizar_combo()
+
         self.limpiar_vehiculo()
 
         messagebox.showinfo(
-            "Éxito",
-            f"Vehículo registrado correctamente.\n\n"
-            f"ID: {id_vehiculo}"
+            "Resultado",
+            mensaje
         )
 
     def eliminar_vehiculo(self):
@@ -337,26 +424,77 @@ class App:
             return
 
         indice = int(seleccion[0])
-        nombre = self.gestor.vehiculos[indice].nombre
+        vehiculo = self.gestor.vehiculos[indice]
 
         if not messagebox.askyesno(
-            "Confirmar",
-            f"¿Eliminar '{nombre}'?"
+                "Confirmar",
+                f"¿Eliminar '{vehiculo.nombre}'?"
         ):
             return
 
         try:
-            self.gestor.eliminar_vehiculo(nombre)
+            eliminar_vehiculo_bd(vehiculo.id)
+
+            self.gestor.eliminar_vehiculo(
+                vehiculo.nombre
+            )
+
+            self.actualizar_vehiculos()
+            self.actualizar_combo()
+
+            messagebox.showinfo(
+                "Éxito",
+                "Vehículo eliminado correctamente."
+            )
 
         except ValueError as error:
             messagebox.showwarning(
                 "Aviso",
                 str(error)
             )
+
+        except Exception as error:
+            messagebox.showerror(
+                "Error de base de datos",
+                f"No se pudo eliminar el vehículo.\n\n{error}"
+            )
+
+    def editar_vehiculo(self):
+        seleccion = self.tabla_vehiculos.selection()
+
+        if not seleccion:
+            messagebox.showwarning(
+                "Aviso",
+                "Seleccione un vehículo."
+            )
             return
 
-        self.actualizar_vehiculos()
-        self.actualizar_combo()
+        indice = int(seleccion[0])
+
+        vehiculo = self.gestor.vehiculos[indice]
+
+        # Guardamos el ID real de SQL Server
+        self.editando_vehiculo = vehiculo.id
+
+        print(
+            "EDITANDO VEHÍCULO ID:",
+            self.editando_vehiculo
+        )
+
+        self.campos["nombre"].set(vehiculo.nombre)
+        self.campos["placa"].set(vehiculo.placa)
+        self.campos["marca"].set(vehiculo.marca)
+        self.campos["modelo"].set(vehiculo.modelo)
+        self.campos["rendimiento"].set(
+            str(vehiculo.rendimiento)
+        )
+        self.campos["precio"].set(
+            str(vehiculo.precio)
+        )
+
+        self.boton_vehiculo.config(
+            text="Guardar cambios"
+        )
 
     def actualizar_vehiculos(self):
         datos = [

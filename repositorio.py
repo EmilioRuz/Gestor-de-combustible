@@ -14,16 +14,16 @@ def obtener_vehiculos():
             modelo,
             rendimiento,
             precio
-        FROM vehiculos
+        FROM dbo.vehiculos
         ORDER BY id
     """)
 
-    vehiculos = cursor.fetchall()
+    registros = cursor.fetchall()
 
     cursor.close()
     conexion.close()
 
-    return vehiculos
+    return registros
 
 
 def insertar_vehiculo(
@@ -41,8 +41,7 @@ def insertar_vehiculo(
         INSERT INTO dbo.vehiculos
             (nombre, placa, marca, modelo, rendimiento, precio)
         OUTPUT INSERTED.id
-        VALUES
-            (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?)
     """,
     nombre,
     placa,
@@ -61,7 +60,6 @@ def insertar_vehiculo(
     return id_vehiculo
 
 
-
 def actualizar_vehiculo(
     id_vehiculo,
     nombre,
@@ -75,7 +73,7 @@ def actualizar_vehiculo(
     cursor = conexion.cursor()
 
     cursor.execute("""
-        UPDATE vehiculos
+        UPDATE dbo.vehiculos
         SET
             nombre = ?,
             placa = ?,
@@ -104,7 +102,7 @@ def eliminar_vehiculo(id_vehiculo):
     cursor = conexion.cursor()
 
     cursor.execute("""
-        DELETE FROM vehiculos
+        DELETE FROM dbo.vehiculos
         WHERE id = ?
     """, id_vehiculo)
 
