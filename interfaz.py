@@ -5,8 +5,52 @@ from datetime import date
 from modelos import Vehiculo, Viaje
 from gestor import GestorDatos
 
+from repositorio import (
+    obtener_vehiculos,
+    insertar_vehiculo,
+    eliminar_vehiculo as eliminar_vehiculo_bd
+)
+
 
 class App:
+    def cargar_vehiculos(self):
+        try:
+            registros = obtener_vehiculos()
+
+            self.gestor.vehiculos.clear()
+
+            for registro in registros:
+                (
+                    id_vehiculo,
+                    nombre,
+                    placa,
+                    marca,
+                    modelo,
+                    rendimiento,
+                    precio
+                ) = registro
+
+                vehiculo = Vehiculo(
+                    id=None,
+                    nombre=nombre,
+                    placa=placa,
+                    marca=marca,
+                    modelo=modelo,
+                    rendimiento=float(rendimiento),
+                    precio=float(precio)
+                )
+
+                self.gestor.vehiculos.append(vehiculo)
+
+            self.actualizar_vehiculos()
+            self.actualizar_combo()
+
+        except Exception as error:
+            messagebox.showerror(
+                "Error de base de datos",
+                f"No se pudieron cargar los vehículos.\n\n{error}"
+            )
+
     def __init__(self, root):
         self.root = root
         self.root.title("Gestión de vehículos y combustible")
@@ -17,6 +61,7 @@ class App:
         self.editando = None
 
         self.crear_interfaz()
+        self.cargar_vehiculos()
 
     def crear_interfaz(self):
         ttk.Label(
@@ -160,7 +205,6 @@ class App:
             ("Placa:", "placa"),
             ("Marca:", "marca"),
             ("Modelo:", "modelo"),
-            ("Cilindrada:", "cc"),
             ("Rendimiento km/l:", "rendimiento"),
             ("Precio litro:", "precio")
         ]
@@ -192,7 +236,6 @@ class App:
                 "Placa",
                 "Marca",
                 "Modelo",
-                "Cilindrada",
                 "Rendimiento",
                 "Precio"
             )
@@ -210,10 +253,11 @@ class App:
             placa = self.campos["placa"].get().strip()
             marca = self.campos["marca"].get().strip()
             modelo = self.campos["modelo"].get().strip()
-            cc = int(self.campos["cc"].get())
+
             rendimiento = float(
                 self.campos["rendimiento"].get()
             )
+
             precio = float(
                 self.campos["precio"].get()
             )
@@ -223,25 +267,53 @@ class App:
                     "Ingrese el nombre del vehículo."
                 )
 
-            if cc <= 0 or rendimiento <= 0 or precio <= 0:
+            if not placa:
                 raise ValueError(
-                    "Los valores deben ser mayores que cero."
+                    "Ingrese la placa del vehículo."
                 )
 
-            vehiculo = Vehiculo(
+            if rendimiento <= 0 or precio <= 0:
+                raise ValueError(
+                    "El rendimiento y el precio "
+                    "deben ser mayores que cero."
+                )
+
+            # Guardar primero en SQL Server
+            id_vehiculo = insertar_vehiculo(
                 nombre,
                 placa,
                 marca,
                 modelo,
-                cc,
                 rendimiento,
                 precio
             )
 
+            # Crear el objeto con el ID generado
+            vehiculo = Vehiculo(
+                id=id_vehiculo,
+                nombre=nombre,
+                placa=placa,
+                marca=marca,
+                modelo=modelo,
+                rendimiento=rendimiento,
+                precio=precio
+            )
+
+            # Agregarlo a la aplicación
             self.gestor.agregar_vehiculo(vehiculo)
 
         except ValueError as error:
-            messagebox.showerror("Error", str(error))
+            messagebox.showerror(
+                "Error",
+                str(error)
+            )
+            return
+
+        except Exception as error:
+            messagebox.showerror(
+                "Error de base de datos",
+                f"No se pudo guardar el vehículo.\n\n{error}"
+            )
             return
 
         self.actualizar_vehiculos()
@@ -250,7 +322,8 @@ class App:
 
         messagebox.showinfo(
             "Éxito",
-            "Vehículo registrado correctamente."
+            f"Vehículo registrado correctamente.\n\n"
+            f"ID: {id_vehiculo}"
         )
 
     def eliminar_vehiculo(self):
@@ -292,7 +365,6 @@ class App:
                 vehiculo.placa,
                 vehiculo.marca,
                 vehiculo.modelo,
-                vehiculo.cc,
                 f"{vehiculo.rendimiento:.2f}",
                 f"${vehiculo.precio:.2f}"
             )
@@ -325,14 +397,15 @@ class App:
 
     def limpiar_vehiculo(self):
         for nombre in (
-            "nombre",
-            "placa",
-            "marca",
-            "modelo",
-            "cc",
-            "precio"
+                "nombre",
+                "placa",
+                "marca",
+                "modelo",
+                "precio"
         ):
             self.campos[nombre].set("")
+
+        self.campos["rendimiento"].set("40")
 
     def crear_tab_viajes(self):
         tab = ttk.Frame(self.tabs)
@@ -435,7 +508,6 @@ class App:
             self.info_vehiculo.config(
                 text=(
                     f"{vehiculo.marca} {vehiculo.modelo} | "
-                    f"{vehiculo.cc} cc | "
                     f"{vehiculo.rendimiento:.2f} km/l | "
                     f"${vehiculo.precio:.2f}/l"
                 )

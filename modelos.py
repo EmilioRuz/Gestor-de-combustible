@@ -3,11 +3,11 @@ from dataclasses import dataclass
 
 @dataclass
 class Vehiculo:
+    id: int | None
     nombre: str
     placa: str
     marca: str
     modelo: str
-    cc: int
     rendimiento: float
     precio: float
 
