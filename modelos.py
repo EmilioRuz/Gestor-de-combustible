@@ -13,6 +13,15 @@ class Vehiculo:
 
 
 @dataclass
+class Conductor:
+    id: int | None
+    nombre: str
+    licencia: str
+    telefono: str = ""
+    activo: bool = True
+
+
+@dataclass
 class Viaje:
     fecha: str
     vehiculo: Vehiculo

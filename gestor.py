@@ -1,10 +1,10 @@
-from modelos import Vehiculo, Viaje
-
-
 class GestorDatos:
     def __init__(self):
         self.vehiculos = []
+        self.conductores = []
         self.viajes = []
+
+    # ================= VEHÍCULOS =================
 
     def agregar_vehiculo(self, vehiculo):
         if any(
@@ -39,6 +39,36 @@ class GestorDatos:
             ),
             None
         )
+
+    # ================= CONDUCTORES =================
+
+    def agregar_conductor(self, conductor):
+        if any(
+            c.licencia.lower() == conductor.licencia.lower()
+            for c in self.conductores
+        ):
+            raise ValueError("Esa licencia ya está registrada.")
+
+        self.conductores.append(conductor)
+
+    def eliminar_conductor(self, id_conductor):
+        self.conductores = [
+            conductor
+            for conductor in self.conductores
+            if conductor.id != id_conductor
+        ]
+
+    def buscar_conductor(self, nombre):
+        return next(
+            (
+                conductor
+                for conductor in self.conductores
+                if conductor.nombre == nombre
+            ),
+            None
+        )
+
+    # ================= VIAJES =================
 
     def agregar_viaje(self, viaje):
         if viaje.km_final <= viaje.km_inicial:

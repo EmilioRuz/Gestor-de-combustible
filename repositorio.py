@@ -1,6 +1,103 @@
 from database import obtener_conexion
 
 
+from database import obtener_conexion
+
+
+def obtener_conductores():
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT
+                id,
+                nombre,
+                licencia,
+                telefono,
+                activo
+            FROM dbo.conductores
+            ORDER BY nombre
+        """)
+
+        return cursor.fetchall()
+
+    finally:
+        cursor.close()
+        conexion.close()
+
+
+def insertar_conductor(nombre, licencia, telefono):
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+
+    try:
+        cursor.execute("""
+            INSERT INTO dbo.conductores
+                (nombre, licencia, telefono)
+            OUTPUT INSERTED.id
+            VALUES (?, ?, ?)
+        """, nombre, licencia, telefono)
+
+        id_conductor = cursor.fetchone()[0]
+        conexion.commit()
+
+        return id_conductor
+
+    except Exception:
+        conexion.rollback()
+        raise
+
+    finally:
+        cursor.close()
+        conexion.close()
+
+
+def actualizar_conductor(id_conductor, nombre, licencia, telefono):
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+
+    try:
+        cursor.execute("""
+            UPDATE dbo.conductores
+            SET
+                nombre = ?,
+                licencia = ?,
+                telefono = ?
+            WHERE id = ?
+        """, nombre, licencia, telefono, id_conductor)
+
+        conexion.commit()
+
+    except Exception:
+        conexion.rollback()
+        raise
+
+    finally:
+        cursor.close()
+        conexion.close()
+
+
+def eliminar_conductor(id_conductor):
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+
+    try:
+        cursor.execute("""
+            DELETE FROM dbo.conductores
+            WHERE id = ?
+        """, id_conductor)
+
+        conexion.commit()
+
+    except Exception:
+        conexion.rollback()
+        raise
+
+    finally:
+        cursor.close()
+        conexion.close()
+
 def obtener_vehiculos():
     conexion = obtener_conexion()
     cursor = conexion.cursor()

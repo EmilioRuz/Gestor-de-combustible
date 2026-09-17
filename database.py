@@ -8,12 +8,10 @@ PASSWORD = "compac"
 
 
 def obtener_conexion():
-    conexion = pyodbc.connect(
+    return pyodbc.connect(
         f"DRIVER={{ODBC Driver 17 for SQL Server}};"
         f"SERVER={SERVER};"
         f"DATABASE={DATABASE};"
         f"UID={USERNAME};"
         f"PWD={PASSWORD};"
     )
-
-    return conexion
