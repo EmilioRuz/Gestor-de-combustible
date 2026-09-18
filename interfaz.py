@@ -6,7 +6,6 @@ from modelos import Vehiculo, Conductor, Viaje
 from gestor import GestorDatos
 from repositorio import *
 
-
 class App:
     def __init__(self, root):
         self.root = root
@@ -21,7 +20,6 @@ class App:
         self.cargar_vehiculos()
         self.cargar_conductores()
 
-    # ==================== GENERAL ====================
 
     def interfaz(self):
         ttk.Label(
@@ -99,7 +97,6 @@ class App:
             side="left", padx=5
         )
 
-    # ==================== VEHÍCULOS ====================
 
     def vehiculos_tab(self):
         tab = ttk.Frame(self.tabs)
@@ -256,7 +253,6 @@ class App:
             self.cveh.current(0)
             self.mostrar_info()
 
-    # ==================== CONDUCTORES ====================
 
     def conductores_tab(self):
         tab = ttk.Frame(self.tabs)
@@ -408,7 +404,6 @@ class App:
         if nombres:
             self.cconductor.current(0)
 
-    # ==================== VIAJES ====================
 
     def viajes_tab(self):
         tab = ttk.Frame(self.tabs)
@@ -510,7 +505,6 @@ class App:
         self.llenar(self.tt, datos)
         self.llenar(self.th, datos)
 
-    # ==================== RESUMEN ====================
 
     def resumen_tab(self):
         tab = ttk.Frame(self.tabs)
