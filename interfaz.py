@@ -4,7 +4,12 @@ from datetime import date
 
 from modelos import Vehiculo, Conductor, Viaje
 from gestor import GestorDatos
-from repositorio import *
+from repositorio import (
+    obtener_vehiculos, insertar_vehiculo, actualizar_vehiculo,
+    eliminar_vehiculo,
+    obtener_conductores, insertar_conductor, actualizar_conductor,
+    eliminar_conductor,
+)
 
 class App:
     def __init__(self, root):

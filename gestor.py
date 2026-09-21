@@ -4,7 +4,6 @@ class GestorDatos:
         self.conductores = []
         self.viajes = []
 
-    # ================= VEHÍCULOS =================
 
     def agregar_vehiculo(self, vehiculo):
         if any(
@@ -40,7 +39,6 @@ class GestorDatos:
             None
         )
 
-    # ================= CONDUCTORES =================
 
     def agregar_conductor(self, conductor):
         if any(
@@ -68,7 +66,6 @@ class GestorDatos:
             None
         )
 
-    # ================= VIAJES =================
 
     def agregar_viaje(self, viaje):
         if viaje.km_final <= viaje.km_inicial:
