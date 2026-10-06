@@ -1,213 +1,190 @@
+"""
+Interfaz grafica con Tkinter.
+Separada en pestanias independientes para mejor mantenimiento.
+"""
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import date
 
 from modelos import Vehiculo, Conductor, Viaje
-from gestor import GestorDatos
 from repositorio import (
     obtener_vehiculos, insertar_vehiculo, actualizar_vehiculo,
-    eliminar_vehiculo,
+    eliminar_vehiculo as repo_eliminar_vehiculo,
     obtener_conductores, insertar_conductor, actualizar_conductor,
-    eliminar_conductor,
+    eliminar_conductor as repo_eliminar_conductor,
+    obtener_viajes, insertar_viaje, actualizar_viaje,
+    eliminar_viaje as repo_eliminar_viaje,
+    viajes_por_vehiculo, viajes_por_conductor,
+    obtener_zonas,
 )
 
-class App:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Gestión de vehículos y combustible")
-        self.root.geometry("1150x750")
 
-        self.gestor = GestorDatos()
+
+# ── Utilidades comunes ────────────────────────────────────────────────
+
+def crear_campo(padre, campos_dict, nombre, texto, fila, col,
+                combo=False, valor_defecto=""):
+    """Crea un label + entry/combobox y lo registra en campos_dict."""
+    ttk.Label(padre, text=texto).grid(
+        row=fila, column=col * 2, padx=5, pady=5, sticky="e"
+    )
+    campos_dict[nombre] = tk.StringVar(value=valor_defecto)
+
+    if combo:
+        widget = ttk.Combobox(
+            padre, textvariable=campos_dict[nombre],
+            state="readonly", width=22
+        )
+    else:
+        widget = ttk.Entry(
+            padre, textvariable=campos_dict[nombre], width=24
+        )
+
+    widget.grid(row=fila, column=col * 2 + 1, padx=5, pady=5)
+    return widget
+
+
+def crear_tabla(padre, columnas, titulo="Registros"):
+    """Crea un Treeview con scrollbar dentro de un LabelFrame."""
+    marco = ttk.LabelFrame(padre, text=titulo)
+    marco.pack(fill="both", expand=True, padx=10, pady=10)
+
+    tabla = ttk.Treeview(marco, columns=columnas, show="headings")
+    for c in columnas:
+        tabla.heading(c, text=c)
+        tabla.column(c, width=120, anchor="center")
+
+    tabla.pack(side="left", fill="both", expand=True)
+
+    scroll = ttk.Scrollbar(marco, command=tabla.yview)
+    scroll.pack(side="right", fill="y")
+    tabla.config(yscrollcommand=scroll.set)
+
+    return tabla
+
+
+def llenar_tabla(tabla, datos):
+    """Limpia y llena una tabla con nuevos datos."""
+    tabla.delete(*tabla.get_children())
+    for i, dato in enumerate(datos):
+        tabla.insert("", "end", iid=i, values=dato)
+
+
+# ── Pestania Vehiculos ────────────────────────────────────────────────
+
+class VehiculosTab:
+    def __init__(self, notebook, app):
+        self.app = app
+        self.tab = ttk.Frame(notebook)
+        notebook.add(self.tab, text="Vehiculos")
+
         self.campos = {}
-        self.editando = self.editando_vehiculo = self.editando_conductor = None
+        self.editando = None
+        self.vehiculos = []
 
-        self.interfaz()
-        self.cargar_vehiculos()
-        self.cargar_conductores()
+        self._crear_formulario()
+        self._crear_tabla()
+        self.cargar()
 
-
-    def interfaz(self):
-        ttk.Label(
-            self.root, text="Gestión de viajes y combustible",
-            font=("Arial", 20, "bold")
-        ).pack(pady=15)
-
-        self.tabs = ttk.Notebook(self.root)
-        self.tabs.pack(fill="both", expand=True, padx=10, pady=10)
-
-        self.vehiculos_tab()
-        self.conductores_tab()
-        self.viajes_tab()
-        self.resumen_tab()
-
-    def campo(self, padre, nombre, texto, fila, col, combo=False):
-        ttk.Label(padre, text=texto).grid(
-            row=fila, column=col * 2, padx=5, pady=5, sticky="e"
-        )
-
-        valor = (
-            date.today().isoformat() if nombre == "fecha"
-            else "40" if nombre == "rendimiento"
-            else ""
-        )
-
-        self.campos[nombre] = tk.StringVar(value=valor)
-
-        widget = (
-            ttk.Combobox(
-                padre, textvariable=self.campos[nombre],
-                state="readonly", width=22
-            )
-            if combo else
-            ttk.Entry(
-                padre, textvariable=self.campos[nombre],
-                width=24
-            )
-        )
-
-        widget.grid(row=fila, column=col * 2 + 1, padx=5, pady=5)
-        return widget
-
-    def tabla(self, padre, columnas):
-        marco = ttk.LabelFrame(padre, text="Registros")
-        marco.pack(fill="both", expand=True, padx=10, pady=10)
-
-        tabla = ttk.Treeview(marco, columns=columnas, show="headings")
-
-        for c in columnas:
-            tabla.heading(c, text=c)
-            tabla.column(c, width=120, anchor="center")
-
-        tabla.pack(side="left", fill="both", expand=True)
-
-        scroll = ttk.Scrollbar(marco, command=tabla.yview)
-        scroll.pack(side="right", fill="y")
-        tabla.config(yscrollcommand=scroll.set)
-
-        return tabla
-
-    def llenar(self, tabla, datos):
-        tabla.delete(*tabla.get_children())
-        for i, dato in enumerate(datos):
-            tabla.insert("", "end", iid=i, values=dato)
-
-    def botones(self, padre, editar, eliminar):
-        frame = ttk.Frame(padre)
-        frame.pack(pady=5)
-
-        ttk.Button(frame, text="Editar", command=editar).pack(
-            side="left", padx=5
-        )
-        ttk.Button(frame, text="Eliminar", command=eliminar).pack(
-            side="left", padx=5
-        )
-
-
-    def vehiculos_tab(self):
-        tab = ttk.Frame(self.tabs)
-        self.tabs.add(tab, text="Vehículos")
-
-        marco = ttk.LabelFrame(tab, text="Vehículo")
+    def _crear_formulario(self):
+        marco = ttk.LabelFrame(self.tab, text="Vehiculo")
         marco.pack(fill="x", padx=10, pady=10)
 
-        campos = [
-            ("Nombre", "nombre"), ("Placa", "placa"),
-            ("Marca", "marca"), ("Modelo", "modelo"),
-            ("Rendimiento", "rendimiento"), ("Precio litro", "precio")
+        campos_def = [
+            ("nombre", "Nombre", 0, 0),
+            ("placa", "Placa", 0, 1),
+            ("marca", "Marca", 1, 0),
+            ("modelo", "Modelo", 1, 1),
+            ("rendimiento", "Rendimiento (km/l)", 2, 0),
+            ("precio", "Precio por litro", 2, 1),
         ]
+        for nombre, texto, fila, col in campos_def:
+            defecto = "40" if nombre == "rendimiento" else ""
+            crear_campo(marco, self.campos, nombre, texto, fila, col,
+                        valor_defecto=defecto)
 
-        for i, (texto, nombre) in enumerate(campos):
-            self.campo(marco, nombre, texto, i // 2, i % 2)
+        btn_frame = ttk.Frame(marco)
+        btn_frame.grid(row=3, column=0, columnspan=4, pady=5)
 
-        self.btn_v = ttk.Button(
-            marco, text="Registrar", command=self.guardar_vehiculo
+        self.btn_guardar = ttk.Button(
+            btn_frame, text="Registrar", command=self.guardar
         )
-        self.btn_v.grid(row=3, column=3, padx=5, pady=5)
+        self.btn_guardar.pack(side="left", padx=5)
 
-        self.tv = self.tabla(
-            tab,
-            ("Vehículo", "Placa", "Marca", "Modelo", "Rendimiento", "Precio")
+        self.btn_cancelar = ttk.Button(
+            btn_frame, text="Cancelar", command=self.cancelar,
+            state="disabled"
+        )
+        self.btn_cancelar.pack(side="left", padx=5)
+
+    def _crear_tabla(self):
+        self.tabla = crear_tabla(
+            self.tab,
+            ("Vehiculo", "Placa", "Marca", "Modelo", "Rendimiento", "Precio")
+        )
+        frame = ttk.Frame(self.tab)
+        frame.pack(pady=5)
+        ttk.Button(frame, text="Editar", command=self.editar).pack(
+            side="left", padx=5
+        )
+        ttk.Button(frame, text="Eliminar", command=self.eliminar).pack(
+            side="left", padx=5
         )
 
-        self.botones(tab, self.editar_vehiculo, self.eliminar_vehiculo)
-
-    def cargar_vehiculos(self):
+    def cargar(self):
         try:
-            self.gestor.vehiculos.clear()
-
-            for r in obtener_vehiculos():
-                self.gestor.vehiculos.append(
-                    Vehiculo(
-                        id=r[0], nombre=r[1], placa=r[2],
-                        marca=r[3], modelo=r[4],
-                        rendimiento=float(r[5]), precio=float(r[6])
-                    )
-                )
-
-            self.mostrar_vehiculos()
-            self.actualizar_combo_vehiculos()
-
+            self.vehiculos = obtener_vehiculos()
+            self._mostrar()
         except Exception as e:
+            print(f"Error cargando vehiculos: {e}")
             messagebox.showerror("Error", str(e))
 
-    def guardar_vehiculo(self):
+    def _mostrar(self):
+        llenar_tabla(self.tabla, [
+            (v.nombre, v.placa, v.marca, v.modelo,
+             f"{v.rendimiento:.2f}", f"${v.precio:.2f}")
+            for v in self.vehiculos
+        ])
+
+    def guardar(self):
         try:
-            datos = (
-                self.campos["nombre"].get().strip(),
-                self.campos["placa"].get().strip(),
-                self.campos["marca"].get().strip(),
-                self.campos["modelo"].get().strip(),
-                float(self.campos["rendimiento"].get()),
-                float(self.campos["precio"].get())
+            vehiculo = Vehiculo(
+                id=self.editando,
+                nombre=self.campos["nombre"].get().strip(),
+                placa=self.campos["placa"].get().strip(),
+                marca=self.campos["marca"].get().strip(),
+                modelo=self.campos["modelo"].get().strip(),
+                rendimiento=float(self.campos["rendimiento"].get() or 0),
+                precio=float(self.campos["precio"].get() or 0),
             )
+            vehiculo.validar()
 
-            nombre, placa, marca, modelo, rendimiento, precio = datos
-
-            if not nombre or not placa:
-                raise ValueError("Nombre y placa son obligatorios.")
-
-            if rendimiento <= 0 or precio <= 0:
-                raise ValueError("Rendimiento y precio deben ser mayores que cero.")
-
-            if self.editando_vehiculo is None:
-                id_ = insertar_vehiculo(*datos)
-
-                self.gestor.agregar_vehiculo(
-                    Vehiculo(id_, nombre, placa, marca, modelo, rendimiento, precio)
-                )
-
-                mensaje = "Vehículo registrado."
+            if self.editando is None:
+                vehiculo.id = insertar_vehiculo(vehiculo)
+                mensaje = "Vehiculo registrado."
             else:
-                actualizar_vehiculo(self.editando_vehiculo, *datos)
+                actualizar_vehiculo(vehiculo)
+                mensaje = "Vehiculo actualizado."
 
-                v = next(
-                    v for v in self.gestor.vehiculos
-                    if v.id == self.editando_vehiculo
-                )
-
-                v.nombre, v.placa, v.marca, v.modelo, v.rendimiento, v.precio = datos
-                mensaje = "Vehículo actualizado."
-
-            self.editando_vehiculo = None
-            self.btn_v.config(text="Registrar")
-            self.mostrar_vehiculos()
-            self.actualizar_combo_vehiculos()
-            self.limpiar_vehiculo()
-
+            self.cancelar()
+            self.cargar()
+            self.app.on_vehiculos_changed()
             messagebox.showinfo("Correcto", mensaje)
 
+        except ValueError as e:
+            messagebox.showerror("Error de validacion", str(e))
         except Exception as e:
+            print(f"Error guardando vehiculo: {e}")
             messagebox.showerror("Error", str(e))
 
-    def editar_vehiculo(self):
-        sel = self.tv.selection()
-
+    def editar(self):
+        sel = self.tabla.selection()
         if not sel:
-            messagebox.showwarning("Aviso", "Seleccione un vehículo.")
+            messagebox.showwarning("Aviso", "Seleccione un vehiculo.")
             return
 
-        v = self.gestor.vehiculos[int(sel[0])]
-        self.editando_vehiculo = v.id
+        v = self.vehiculos[int(sel[0])]
+        self.editando = v.id
 
         for campo, valor in {
             "nombre": v.nombre, "placa": v.placa,
@@ -216,275 +193,316 @@ class App:
         }.items():
             self.campos[campo].set(valor)
 
-        self.btn_v.config(text="Guardar cambios")
+        self.btn_guardar.config(text="Guardar cambios")
+        self.btn_cancelar.config(state="normal")
 
-    def eliminar_vehiculo(self):
-        sel = self.tv.selection()
-
+    def eliminar(self):
+        sel = self.tabla.selection()
         if not sel:
-            messagebox.showwarning("Aviso", "Seleccione un vehículo.")
+            messagebox.showwarning("Aviso", "Seleccione un vehiculo.")
             return
 
-        v = self.gestor.vehiculos[int(sel[0])]
-
-        if messagebox.askyesno("Confirmar", f"¿Eliminar {v.nombre}?"):
+        v = self.vehiculos[int(sel[0])]
+        if messagebox.askyesno("Confirmar", f"Eliminar {v.nombre}?"):
             try:
-                eliminar_vehiculo(v.id)
-                self.gestor.eliminar_vehiculo(v.nombre)
-                self.mostrar_vehiculos()
-                self.actualizar_combo_vehiculos()
+                repo_eliminar_vehiculo(v.id)
+                self.cargar()
+                self.app.on_vehiculos_changed()
             except Exception as e:
+                print(f"Error eliminando vehiculo: {e}")
                 messagebox.showerror("Error", str(e))
 
-    def mostrar_vehiculos(self):
-        self.llenar(self.tv, [
-            (
-                v.nombre, v.placa, v.marca, v.modelo,
-                f"{v.rendimiento:.2f}", f"${v.precio:.2f}"
+    def cancelar(self):
+        self.editando = None
+        self.btn_guardar.config(text="Registrar")
+        self.btn_cancelar.config(state="disabled")
+        for key in self.campos:
+            self.campos[key].set(
+                "40" if key == "rendimiento" else ""
             )
-            for v in self.gestor.vehiculos
-        ])
-
-    def limpiar_vehiculo(self):
-        for x in ("nombre", "placa", "marca", "modelo", "precio"):
-            self.campos[x].set("")
-        self.campos["rendimiento"].set("40")
-
-    def actualizar_combo_vehiculos(self):
-        nombres = [v.nombre for v in self.gestor.vehiculos]
-        self.cveh["values"] = nombres
-
-        if nombres:
-            self.cveh.current(0)
-            self.mostrar_info()
 
 
-    def conductores_tab(self):
-        tab = ttk.Frame(self.tabs)
-        self.tabs.add(tab, text="Conductores")
+# ── Pestania Conductores ──────────────────────────────────────────────
 
-        marco = ttk.LabelFrame(tab, text="Conductor")
+class ConductoresTab:
+    def __init__(self, notebook, app):
+        self.app = app
+        self.tab = ttk.Frame(notebook)
+        notebook.add(self.tab, text="Conductores")
+
+        self.campos = {}
+        self.editando = None
+        self.conductores = []
+
+        self._crear_formulario()
+        self._crear_tabla()
+        self.cargar()
+
+    def _crear_formulario(self):
+        marco = ttk.LabelFrame(self.tab, text="Conductor")
         marco.pack(fill="x", padx=10, pady=10)
 
-        self.campo(marco, "nombre_conductor", "Nombre", 0, 0)
-        self.campo(marco, "licencia", "Licencia", 0, 1)
-        self.campo(marco, "telefono", "Teléfono", 1, 0)
+        crear_campo(marco, self.campos, "nombre_c", "Nombre", 0, 0)
+        crear_campo(marco, self.campos, "licencia", "Licencia", 0, 1)
+        crear_campo(marco, self.campos, "telefono", "Telefono", 1, 0)
 
-        self.btn_c = ttk.Button(
-            marco, text="Registrar", command=self.guardar_conductor
+        btn_frame = ttk.Frame(marco)
+        btn_frame.grid(row=1, column=2, columnspan=2, pady=5)
+
+        self.btn_guardar = ttk.Button(
+            btn_frame, text="Registrar", command=self.guardar
         )
-        self.btn_c.grid(row=1, column=3, padx=5, pady=5)
+        self.btn_guardar.pack(side="left", padx=5)
 
-        self.tc = self.tabla(
-            tab, ("Nombre", "Licencia", "Teléfono", "Estado")
+        self.btn_cancelar = ttk.Button(
+            btn_frame, text="Cancelar", command=self.cancelar,
+            state="disabled"
+        )
+        self.btn_cancelar.pack(side="left", padx=5)
+
+    def _crear_tabla(self):
+        self.tabla = crear_tabla(
+            self.tab, ("Nombre", "Licencia", "Telefono", "Estado")
+        )
+        frame = ttk.Frame(self.tab)
+        frame.pack(pady=5)
+        ttk.Button(frame, text="Editar", command=self.editar).pack(
+            side="left", padx=5
+        )
+        ttk.Button(frame, text="Eliminar", command=self.eliminar).pack(
+            side="left", padx=5
         )
 
-        self.botones(tab, self.editar_conductor, self.eliminar_conductor)
-
-    def cargar_conductores(self):
+    def cargar(self):
         try:
-            self.gestor.conductores.clear()
-
-            for r in obtener_conductores():
-                self.gestor.conductores.append(
-                    Conductor(
-                        id=r[0], nombre=r[1],
-                        licencia=r[2], telefono=r[3] or "",
-                        activo=bool(r[4])
-                    )
-                )
-
-            self.mostrar_conductores()
-            self.actualizar_combo_conductores()
-
+            self.conductores = obtener_conductores()
+            self._mostrar()
         except Exception as e:
+            print(f"Error cargando conductores: {e}")
             messagebox.showerror("Error", str(e))
 
-    def mostrar_conductores(self):
-        self.llenar(self.tc, [
-            (
-                c.nombre, c.licencia, c.telefono,
-                "Activo" if c.activo else "Inactivo"
-            )
-            for c in self.gestor.conductores
+    def _mostrar(self):
+        llenar_tabla(self.tabla, [
+            (c.nombre, c.licencia, c.telefono,
+             "Activo" if c.activo else "Inactivo")
+            for c in self.conductores
         ])
 
-    def guardar_conductor(self):
+    def guardar(self):
         try:
-            datos = (
-                self.campos["nombre_conductor"].get().strip(),
-                self.campos["licencia"].get().strip(),
-                self.campos["telefono"].get().strip()
+            conductor = Conductor(
+                id=self.editando,
+                nombre=self.campos["nombre_c"].get().strip(),
+                licencia=self.campos["licencia"].get().strip(),
+                telefono=self.campos["telefono"].get().strip(),
             )
+            conductor.validar()
 
-            if not datos[0]:
-                raise ValueError("El nombre del conductor es obligatorio.")
-
-            if not datos[1]:
-                raise ValueError("La licencia es obligatoria.")
-
-            if self.editando_conductor is None:
-                id_ = insertar_conductor(*datos)
-                self.gestor.agregar_conductor(
-                    Conductor(id=id_, nombre=datos[0],
-                              licencia=datos[1], telefono=datos[2])
-                )
+            if self.editando is None:
+                conductor.id = insertar_conductor(conductor)
                 mensaje = "Conductor registrado."
             else:
-                actualizar_conductor(self.editando_conductor, *datos)
-
-                c = next(
-                    c for c in self.gestor.conductores
-                    if c.id == self.editando_conductor
-                )
-
-                c.nombre, c.licencia, c.telefono = datos
+                actualizar_conductor(conductor)
                 mensaje = "Conductor actualizado."
 
-            self.editando_conductor = None
-            self.btn_c.config(text="Registrar")
-            self.mostrar_conductores()
-            self.actualizar_combo_conductores()
-            self.limpiar_conductor()
-
+            self.cancelar()
+            self.cargar()
+            self.app.on_conductores_changed()
             messagebox.showinfo("Correcto", mensaje)
 
+        except ValueError as e:
+            messagebox.showerror("Error de validacion", str(e))
         except Exception as e:
+            print(f"Error guardando conductor: {e}")
             messagebox.showerror("Error", str(e))
 
-    def editar_conductor(self):
-        sel = self.tc.selection()
-
+    def editar(self):
+        sel = self.tabla.selection()
         if not sel:
             messagebox.showwarning("Aviso", "Seleccione un conductor.")
             return
 
-        c = self.gestor.conductores[int(sel[0])]
-        self.editando_conductor = c.id
+        c = self.conductores[int(sel[0])]
+        self.editando = c.id
 
-        for campo, valor in {
-            "nombre_conductor": c.nombre,
-            "licencia": c.licencia,
-            "telefono": c.telefono
-        }.items():
-            self.campos[campo].set(valor)
+        self.campos["nombre_c"].set(c.nombre)
+        self.campos["licencia"].set(c.licencia)
+        self.campos["telefono"].set(c.telefono)
 
-        self.btn_c.config(text="Guardar cambios")
+        self.btn_guardar.config(text="Guardar cambios")
+        self.btn_cancelar.config(state="normal")
 
-    def eliminar_conductor(self):
-        sel = self.tc.selection()
-
+    def eliminar(self):
+        sel = self.tabla.selection()
         if not sel:
             messagebox.showwarning("Aviso", "Seleccione un conductor.")
             return
 
-        c = self.gestor.conductores[int(sel[0])]
-
-        if any(v.conductor == c.nombre for v in self.gestor.viajes):
-            messagebox.showerror(
-                "Error",
-                "No se puede eliminar un conductor con viajes registrados."
-            )
-            return
-
-        if messagebox.askyesno("Confirmar", f"¿Eliminar a {c.nombre}?"):
+        c = self.conductores[int(sel[0])]
+        if messagebox.askyesno("Confirmar", f"Eliminar a {c.nombre}?"):
             try:
-                eliminar_conductor(c.id)
-                self.gestor.eliminar_conductor(c.id)
-                self.mostrar_conductores()
-                self.actualizar_combo_conductores()
+                repo_eliminar_conductor(c.id)
+                self.cargar()
+                self.app.on_conductores_changed()
             except Exception as e:
+                print(f"Error eliminando conductor: {e}")
                 messagebox.showerror("Error", str(e))
 
-    def limpiar_conductor(self):
-        for x in ("nombre_conductor", "licencia", "telefono"):
-            self.campos[x].set("")
+    def cancelar(self):
+        self.editando = None
+        self.btn_guardar.config(text="Registrar")
+        self.btn_cancelar.config(state="disabled")
+        for key in self.campos:
+            self.campos[key].set("")
 
-    def actualizar_combo_conductores(self):
-        nombres = [
-            c.nombre for c in self.gestor.conductores if c.activo
-        ]
-        self.cconductor["values"] = nombres
-
-        if nombres:
-            self.cconductor.current(0)
+    def activos(self):
+        return [c for c in self.conductores if c.activo]
 
 
-    def viajes_tab(self):
-        tab = ttk.Frame(self.tabs)
-        self.tabs.add(tab, text="Registrar viaje")
+# ── Pestania Viajes ───────────────────────────────────────────────────
 
-        marco = ttk.LabelFrame(tab, text="Viaje")
+class ViajesTab:
+    def __init__(self, notebook, app):
+        self.app = app
+        self.tab = ttk.Frame(notebook)
+        notebook.add(self.tab, text="Registrar viaje")
+
+        self.campos = {}
+        self.editando = None
+
+        self._crear_formulario()
+        self._crear_tabla()
+
+    def _crear_formulario(self):
+        marco = ttk.LabelFrame(self.tab, text="Viaje")
         marco.pack(fill="x", padx=10, pady=10)
 
-        self.cveh = self.campo(marco, "vehiculo", "Vehículo", 0, 0, True)
-        self.cveh.bind("<<ComboboxSelected>>", self.mostrar_info)
-
-        self.campo(marco, "fecha", "Fecha", 0, 1)
-        self.cconductor = self.campo(
-            marco, "conductor", "Conductor", 1, 0, True
+        self.combo_vehiculo = crear_campo(
+            marco, self.campos, "vehiculo", "Vehiculo", 0, 0, combo=True
         )
-        self.campo(marco, "origen", "Origen", 1, 1)
-        self.campo(marco, "destino", "Destino", 2, 0)
-        self.campo(marco, "km_inicial", "Km inicial", 2, 1)
-        self.campo(marco, "km_final", "Km final", 3, 0)
-        self.campo(marco, "observaciones", "Observaciones", 3, 1)
+        self.combo_vehiculo.bind("<<ComboboxSelected>>", self._mostrar_info)
 
-        self.info = ttk.Label(marco, foreground="blue")
-        self.info.grid(row=4, column=0, columnspan=4)
+        crear_campo(marco, self.campos, "fecha", "Fecha (AAAA-MM-DD)",
+                    0, 1, valor_defecto=date.today().isoformat())
 
-        self.btn_t = ttk.Button(
-            marco, text="Registrar", command=self.guardar_viaje
+        self.combo_conductor = crear_campo(
+            marco, self.campos, "conductor", "Conductor", 1, 0, combo=True
         )
-        self.btn_t.grid(row=5, column=3, padx=5, pady=5)
+        crear_campo(marco, self.campos, "origen", "Origen", 1, 1)
+        crear_campo(marco, self.campos, "destino", "Destino", 2, 0)
+        crear_campo(marco, self.campos, "km_inicial", "Km inicial", 2, 1)
+        crear_campo(marco, self.campos, "km_final", "Km final", 3, 0)
+        self.combo_zona = crear_campo(
+            marco, self.campos, "zona", "Zona/Ruta", 3, 1, combo=True
+        )
+        crear_campo(marco, self.campos, "observaciones", "Observaciones", 4, 0)
 
-        self.tt = self.tabla(
-            tab,
-            ("Fecha", "Vehículo", "Conductor", "Origen",
-             "Destino", "Km", "Litros", "Gasto")
+        self.info_label = ttk.Label(marco, foreground="blue")
+        self.info_label.grid(row=5, column=0, columnspan=4)
+
+        btn_frame = ttk.Frame(marco)
+        btn_frame.grid(row=6, column=0, columnspan=4, pady=5)
+
+        self.btn_guardar = ttk.Button(
+            btn_frame, text="Registrar", command=self.guardar
+        )
+        self.btn_guardar.pack(side="left", padx=5)
+
+        self.btn_cancelar = ttk.Button(
+            btn_frame, text="Cancelar", command=self.cancelar,
+            state="disabled"
+        )
+        self.btn_cancelar.pack(side="left", padx=5)
+
+    def _crear_tabla(self):
+        self.tabla = crear_tabla(
+            self.tab,
+            ("Fecha", "Vehiculo", "Conductor", "Zona",
+             "Origen", "Destino", "Km", "Litros", "Gasto")
         )
 
-    def mostrar_info(self, event=None):
-        v = self.gestor.buscar_vehiculo(self.cveh.get())
+    def actualizar_combos(self):
+        vehiculos = self.app.vehiculos_tab.vehiculos
+        nombres_v = [v.nombre for v in vehiculos]
+        self.combo_vehiculo["values"] = nombres_v
+        if nombres_v:
+            self.combo_vehiculo.current(0)
+            self._mostrar_info()
 
+        conductores = self.app.conductores_tab.activos()
+        nombres_c = [c.nombre for c in conductores]
+        self.combo_conductor["values"] = nombres_c
+        if nombres_c:
+            self.combo_conductor.current(0)
+
+        # Cargar zonas desde Orgzone
+        try:
+            self.zonas = obtener_zonas()
+            nombres_z = [z[1] for z in self.zonas]
+            self.combo_zona["values"] = nombres_z
+            if nombres_z:
+                self.combo_zona.current(0)
+        except Exception as e:
+            print(f"Error cargando zonas: {e}")
+            self.zonas = []
+
+    def _mostrar_info(self, event=None):
+        nombre = self.campos["vehiculo"].get()
+        vehiculos = self.app.vehiculos_tab.vehiculos
+        v = next((x for x in vehiculos if x.nombre == nombre), None)
         if v:
-            self.info.config(
+            self.info_label.config(
                 text=f"{v.marca} {v.modelo} | "
                      f"{v.rendimiento:.2f} km/l | ${v.precio:.2f}/l"
             )
 
-    def guardar_viaje(self):
+    def guardar(self):
         try:
-            v = self.gestor.buscar_vehiculo(self.cveh.get())
+            nombre_v = self.campos["vehiculo"].get()
+            nombre_c = self.campos["conductor"].get()
 
+            vehiculos = self.app.vehiculos_tab.vehiculos
+            v = next((x for x in vehiculos if x.nombre == nombre_v), None)
             if not v:
-                raise ValueError("Seleccione un vehículo.")
+                raise ValueError("Seleccione un vehiculo.")
 
-            if not self.cconductor.get():
+            conductores = self.app.conductores_tab.conductores
+            c = next((x for x in conductores if x.nombre == nombre_c), None)
+            if not c:
                 raise ValueError("Seleccione un conductor.")
 
-            viaje = Viaje(
-                fecha=self.campos["fecha"].get(),
-                vehiculo=v,
-                conductor=self.cconductor.get(),
-                origen=self.campos["origen"].get(),
-                destino=self.campos["destino"].get(),
-                km_inicial=float(self.campos["km_inicial"].get()),
-                km_final=float(self.campos["km_final"].get()),
-                observaciones=self.campos["observaciones"].get()
+            # Obtener zona seleccionada
+            nombre_zona = self.campos["zona"].get()
+            zona_sel = next(
+                (z for z in self.zonas if z[1] == nombre_zona), None
             )
+            zona_id = zona_sel[0] if zona_sel else None
+
+            viaje = Viaje(
+                id=self.editando,
+                fecha=self.campos["fecha"].get().strip(),
+                vehiculo=v,
+                conductor_id=c.id,
+                conductor_nombre=c.nombre,
+                origen=self.campos["origen"].get().strip(),
+                destino=self.campos["destino"].get().strip(),
+                km_inicial=float(self.campos["km_inicial"].get() or 0),
+                km_final=float(self.campos["km_final"].get() or 0),
+                zona_id=zona_id,
+                zona_nombre=nombre_zona or "",
+                observaciones=self.campos["observaciones"].get().strip(),
+            )
+            viaje.validar()
 
             if self.editando is None:
-                self.gestor.agregar_viaje(viaje)
+                viaje.id = insertar_viaje(viaje)
                 mensaje = "Viaje registrado."
             else:
-                self.gestor.modificar_viaje(self.editando, viaje)
+                actualizar_viaje(viaje)
                 mensaje = "Viaje actualizado."
 
-            self.editando = None
-            self.btn_t.config(text="Registrar")
-            self.actualizar_viajes()
-            self.actualizar_resumen()
+            self.cancelar()
+            self.app.cargar_viajes()
 
             messagebox.showinfo(
                 "Correcto",
@@ -494,91 +512,326 @@ class App:
                 f"Gasto: ${viaje.gasto:.2f}"
             )
 
+        except ValueError as e:
+            messagebox.showerror("Error de validacion", str(e))
         except Exception as e:
+            print(f"Error guardando viaje: {e}")
             messagebox.showerror("Error", str(e))
 
-    def actualizar_viajes(self):
-        datos = [
-            (
-                v.fecha, v.vehiculo.nombre, v.conductor,
-                v.origen, v.destino, f"{v.km:.2f}",
-                f"{v.litros:.2f}", f"${v.gasto:.2f}"
-            )
-            for v in self.gestor.viajes
-        ]
+    def editar_viaje(self, viaje):
+        """Llamado desde ResumenTab para editar un viaje."""
+        self.editando = viaje.id
 
-        self.llenar(self.tt, datos)
-        self.llenar(self.th, datos)
+        self.campos["fecha"].set(viaje.fecha)
+        self.campos["vehiculo"].set(viaje.vehiculo.nombre)
+        self.campos["conductor"].set(viaje.conductor_nombre)
+        self.campos["origen"].set(viaje.origen)
+        self.campos["destino"].set(viaje.destino)
+        self.campos["km_inicial"].set(viaje.km_inicial)
+        self.campos["km_final"].set(viaje.km_final)
+        self.campos["zona"].set(viaje.zona_nombre)
+        self.campos["observaciones"].set(viaje.observaciones)
+
+        self._mostrar_info()
+        self.btn_guardar.config(text="Guardar cambios")
+        self.btn_cancelar.config(state="normal")
+
+    def mostrar_viajes(self, viajes):
+        llenar_tabla(self.tabla, [
+            (v.fecha, v.vehiculo.nombre, v.conductor_nombre,
+             v.zona_nombre, v.origen, v.destino, f"{v.km:.2f}",
+             f"{v.litros:.2f}", f"${v.gasto:.2f}")
+            for v in viajes
+        ])
+
+    def cancelar(self):
+        self.editando = None
+        self.btn_guardar.config(text="Registrar")
+        self.btn_cancelar.config(state="disabled")
+        for key in ("origen", "destino", "km_inicial",
+                     "km_final", "observaciones"):
+            self.campos[key].set("")
+        self.campos["fecha"].set(date.today().isoformat())
 
 
-    def resumen_tab(self):
-        tab = ttk.Frame(self.tabs)
-        self.tabs.add(tab, text="Resumen")
+# ── Pestania Resumen ──────────────────────────────────────────────────
 
-        self.resumen = ttk.Label(tab, font=("Arial", 13))
-        self.resumen.pack(pady=15)
+class ResumenTab:
+    def __init__(self, notebook, app):
+        self.app = app
+        self.tab = ttk.Frame(notebook)
+        notebook.add(self.tab, text="Resumen")
 
-        self.th = self.tabla(
-            tab,
-            ("Fecha", "Vehículo", "Conductor", "Origen",
-             "Destino", "Km", "Litros", "Gasto")
+        self.resumen_label = ttk.Label(self.tab, font=("Arial", 13))
+        self.resumen_label.pack(pady=15)
+
+        # Filtros
+        filtro_frame = ttk.LabelFrame(self.tab, text="Filtros")
+        filtro_frame.pack(fill="x", padx=10, pady=5)
+
+        self.filtros = {}
+        crear_campo(filtro_frame, self.filtros, "filtro_vehiculo",
+                    "Vehiculo", 0, 0, combo=True)
+        crear_campo(filtro_frame, self.filtros, "filtro_conductor",
+                    "Conductor", 0, 1, combo=True)
+        crear_campo(filtro_frame, self.filtros, "fecha_desde",
+                    "Desde", 1, 0)
+        crear_campo(filtro_frame, self.filtros, "fecha_hasta",
+                    "Hasta", 1, 1)
+
+        btn_frame = ttk.Frame(filtro_frame)
+        btn_frame.grid(row=2, column=0, columnspan=4, pady=5)
+        ttk.Button(btn_frame, text="Filtrar",
+                   command=self._aplicar_filtros).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Limpiar filtros",
+                   command=self._limpiar_filtros).pack(side="left", padx=5)
+
+        self.tabla = crear_tabla(
+            self.tab,
+            ("Fecha", "Vehiculo", "Conductor", "Zona",
+             "Origen", "Destino", "Km", "Litros", "Gasto")
         )
 
-        self.botones(tab, self.editar_viaje, self.eliminar_viaje)
+        frame = ttk.Frame(self.tab)
+        frame.pack(pady=5)
+        ttk.Button(frame, text="Editar", command=self._editar).pack(
+            side="left", padx=5
+        )
+        ttk.Button(frame, text="Eliminar", command=self._eliminar).pack(
+            side="left", padx=5
+        )
 
-    def editar_viaje(self):
-        sel = self.th.selection()
+        self.viajes_mostrados = []
 
+    def actualizar(self, viajes):
+        self.todos_los_viajes = viajes
+        self._aplicar_filtros()
+
+    def actualizar_combos_filtro(self):
+        vehiculos = self.app.vehiculos_tab.vehiculos
+        self.filtros["filtro_vehiculo"].set("")
+        # acceder al widget combobox
+        for widget in self.tab.winfo_children():
+            if isinstance(widget, ttk.LabelFrame):
+                for child in widget.winfo_children():
+                    pass
+
+        # Buscar los combos por nombre de variable
+        nombres_v = [""] + [v.nombre for v in vehiculos]
+        conductores = self.app.conductores_tab.conductores
+        nombres_c = [""] + [c.nombre for c in conductores]
+
+        # Actualizar combos de filtro
+        self._combo_filtro_vehiculo["values"] = nombres_v
+        self._combo_filtro_conductor["values"] = nombres_c
+
+    @property
+    def _combo_filtro_vehiculo(self):
+        """Obtiene el widget combobox de filtro vehiculo."""
+        # Buscar en el frame de filtros
+        for widget in self.tab.winfo_children():
+            if isinstance(widget, ttk.LabelFrame) and widget.cget("text") == "Filtros":
+                for child in widget.winfo_children():
+                    if isinstance(child, ttk.Combobox):
+                        var = str(child.cget("textvariable"))
+                        actual_var = str(self.filtros["filtro_vehiculo"])
+                        if var == actual_var:
+                            return child
+        return ttk.Combobox()
+
+    @property
+    def _combo_filtro_conductor(self):
+        """Obtiene el widget combobox de filtro conductor."""
+        for widget in self.tab.winfo_children():
+            if isinstance(widget, ttk.LabelFrame) and widget.cget("text") == "Filtros":
+                for child in widget.winfo_children():
+                    if isinstance(child, ttk.Combobox):
+                        var = str(child.cget("textvariable"))
+                        actual_var = str(self.filtros["filtro_conductor"])
+                        if var == actual_var:
+                            return child
+        return ttk.Combobox()
+
+    def _aplicar_filtros(self):
+        viajes = getattr(self, "todos_los_viajes", [])
+        f_vehiculo = self.filtros.get("filtro_vehiculo",
+                                       tk.StringVar()).get()
+        f_conductor = self.filtros.get("filtro_conductor",
+                                        tk.StringVar()).get()
+        f_desde = self.filtros.get("fecha_desde", tk.StringVar()).get()
+        f_hasta = self.filtros.get("fecha_hasta", tk.StringVar()).get()
+
+        filtrados = viajes
+        if f_vehiculo:
+            filtrados = [v for v in filtrados
+                         if v.vehiculo.nombre == f_vehiculo]
+        if f_conductor:
+            filtrados = [v for v in filtrados
+                         if v.conductor_nombre == f_conductor]
+        if f_desde:
+            filtrados = [v for v in filtrados if v.fecha >= f_desde]
+        if f_hasta:
+            filtrados = [v for v in filtrados if v.fecha <= f_hasta]
+
+        self.viajes_mostrados = filtrados
+        self._mostrar(filtrados)
+
+    def _limpiar_filtros(self):
+        for key in self.filtros:
+            self.filtros[key].set("")
+        self._aplicar_filtros()
+
+    def _mostrar(self, viajes):
+        llenar_tabla(self.tabla, [
+            (v.fecha, v.vehiculo.nombre, v.conductor_nombre,
+             v.zona_nombre, v.origen, v.destino, f"{v.km:.2f}",
+             f"{v.litros:.2f}", f"${v.gasto:.2f}")
+            for v in viajes
+        ])
+
+        km = sum(v.km for v in viajes)
+        litros = sum(v.litros for v in viajes)
+        gasto = sum(v.gasto for v in viajes)
+
+        total_vehiculos = len(self.app.vehiculos_tab.vehiculos)
+        total_conductores = len(self.app.conductores_tab.conductores)
+
+        self.resumen_label.config(text=(
+            f"Vehiculos: {total_vehiculos}   "
+            f"Conductores: {total_conductores}   "
+            f"Viajes: {len(viajes)}\n"
+            f"Km: {km:.2f}   "
+            f"Litros: {litros:.2f}   "
+            f"Gasto: ${gasto:.2f}\n"
+            f"Rendimiento: {km / litros if litros else 0:.2f} km/l   "
+            f"Costo/km: ${gasto / km if km else 0:.2f}"
+        ))
+
+    def _editar(self):
+        sel = self.tabla.selection()
         if not sel:
             messagebox.showwarning("Aviso", "Seleccione un viaje.")
             return
 
-        i = int(sel[0])
-        v = self.gestor.viajes[i]
-        self.editando = i
+        viaje = self.viajes_mostrados[int(sel[0])]
+        self.app.viajes_tab.editar_viaje(viaje)
+        self.app.tabs.select(2)
 
-        datos = {
-            "fecha": v.fecha,
-            "vehiculo": v.vehiculo.nombre,
-            "conductor": v.conductor,
-            "origen": v.origen,
-            "destino": v.destino,
-            "km_inicial": v.km_inicial,
-            "km_final": v.km_final,
-            "observaciones": v.observaciones
-        }
-
-        for campo, valor in datos.items():
-            self.campos[campo].set(valor)
-
-        self.mostrar_info()
-        self.btn_t.config(text="Guardar cambios")
-        self.tabs.select(2)
-
-    def eliminar_viaje(self):
-        sel = self.th.selection()
-
+    def _eliminar(self):
+        sel = self.tabla.selection()
         if not sel:
             messagebox.showwarning("Aviso", "Seleccione un viaje.")
             return
 
-        if messagebox.askyesno("Confirmar", "¿Eliminar viaje?"):
-            self.gestor.eliminar_viaje(int(sel[0]))
-            self.actualizar_viajes()
-            self.actualizar_resumen()
+        viaje = self.viajes_mostrados[int(sel[0])]
+        if messagebox.askyesno("Confirmar", "Eliminar este viaje?"):
+            try:
+                repo_eliminar_viaje(viaje.id)
+                self.app.cargar_viajes()
+            except Exception as e:
+                print(f"Error eliminando viaje: {e}")
+                messagebox.showerror("Error", str(e))
 
-    def actualizar_resumen(self):
-        r = self.gestor.resumen()
 
-        self.resumen.config(
-            text=(
-                f"Vehículos: {len(self.gestor.vehiculos)}   "
-                f"Conductores: {len(self.gestor.conductores)}   "
-                f"Viajes: {len(self.gestor.viajes)}\n"
-                f"Km: {r['km']:.2f}   "
-                f"Litros: {r['litros']:.2f}   "
-                f"Gasto: ${r['gasto']:.2f}\n"
-                f"Rendimiento: {r['rendimiento']:.2f} km/l   "
-                f"Costo/km: ${r['costo_km']:.2f}"
-            )
+# ── Pestania Reportes ─────────────────────────────────────────────────
+
+class ReportesTab:
+    def __init__(self, notebook, app):
+        self.app = app
+        self.tab = ttk.Frame(notebook)
+        notebook.add(self.tab, text="Reportes")
+
+        ttk.Button(
+            self.tab, text="Actualizar reportes",
+            command=self.actualizar
+        ).pack(pady=10)
+
+        # Reporte por vehiculo
+        self.tabla_vehiculos = crear_tabla(
+            self.tab,
+            ("Vehiculo", "Viajes", "Km", "Litros", "Gasto"),
+            titulo="Por vehiculo"
         )
+
+        # Reporte por conductor
+        self.tabla_conductores = crear_tabla(
+            self.tab,
+            ("Conductor", "Viajes", "Km"),
+            titulo="Por conductor"
+        )
+
+    def actualizar(self):
+        try:
+            datos_v = viajes_por_vehiculo()
+            llenar_tabla(self.tabla_vehiculos, [
+                (d["vehiculo"], d["viajes"], f"{d['km']:.2f}",
+                 f"{d['litros']:.2f}", f"${d['gasto']:.2f}")
+                for d in datos_v
+            ])
+
+            datos_c = viajes_por_conductor()
+            llenar_tabla(self.tabla_conductores, [
+                (d["conductor"], d["viajes"], f"{d['km']:.2f}")
+                for d in datos_c
+            ])
+
+        except Exception as e:
+            print(f"Error en reportes: {e}")
+            messagebox.showerror("Error", str(e))
+
+
+# ── Aplicacion principal ──────────────────────────────────────────────
+
+class App:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Gestion de vehiculos y combustible")
+        self.root.geometry("1200x800")
+
+        ttk.Label(
+            self.root, text="Gestion de viajes y combustible",
+            font=("Arial", 20, "bold")
+        ).pack(pady=15)
+
+        self.tabs = ttk.Notebook(self.root)
+        self.tabs.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Crear pestanias
+        self.vehiculos_tab = VehiculosTab(self.tabs, self)
+        self.conductores_tab = ConductoresTab(self.tabs, self)
+        self.viajes_tab = ViajesTab(self.tabs, self)
+        self.resumen_tab = ResumenTab(self.tabs, self)
+        self.reportes_tab = ReportesTab(self.tabs, self)
+
+        # Actualizar combos iniciales
+        self.viajes_tab.actualizar_combos()
+        self.cargar_viajes()
+
+        # Actualizar resumen al cambiar de pestania
+        self.tabs.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+    def on_vehiculos_changed(self):
+        self.viajes_tab.actualizar_combos()
+
+    def on_conductores_changed(self):
+        self.viajes_tab.actualizar_combos()
+
+    def cargar_viajes(self):
+        try:
+            vehiculos_dict = {
+                v.id: v for v in self.vehiculos_tab.vehiculos
+            }
+            viajes = obtener_viajes(vehiculos_dict)
+            self.viajes_tab.mostrar_viajes(viajes)
+            self.resumen_tab.actualizar(viajes)
+        except Exception as e:
+            print(f"Error cargando viajes: {e}")
+            messagebox.showerror("Error", str(e))
+
+    def _on_tab_changed(self, event=None):
+        """Actualiza datos al cambiar de pestania."""
+        tab_index = self.tabs.index(self.tabs.select())
+        if tab_index == 3:  # Resumen
+            self.cargar_viajes()
+        elif tab_index == 4:  # Reportes
+            self.reportes_tab.actualizar()
